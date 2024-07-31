@@ -1,0 +1,35 @@
+---
+- name: Get and label Kubernetes namespaces
+  hosts: localhost
+  gather_facts: no
+  tasks:
+    - name: Retrieve all namespaces
+      command: kubectl get namespaces -o json
+      register: namespaces_json
+
+    - name: Filter namespaces with kube-*, reserved-*, and default
+      set_fact:
+        filtered_namespaces: >-
+          {{
+            namespaces_json.stdout | from_json | json_query('items[?starts_with(metadata.name, `kube-`)]') +
+            namespaces_json.stdout | from_json | json_query('items[?starts_with(metadata.name, `reserved-`)]') +
+            (namespaces_json.stdout | from_json | json_query('items[?metadata.name==`default`]') | list)
+          }}
+
+    - name: Add label backup=true to filtered namespaces
+      command: kubectl label namespace {{ item.metadata.name }} backup=true --overwrite
+      loop: "{{ filtered_namespaces }}"
+      when: item.metadata.labels.backup is not defined or item.metadata.labels.backup != "true"
+      register: label_result
+
+    - name: Display labeled namespaces
+      debug:
+        msg: "Namespace {{ item.metadata.name }} has been labeled with backup=true"
+      loop: "{{ filtered_namespaces }}"
+      when: item.metadata.labels.backup is not defined or item.metadata.labels.backup != "true"
+
+    - name: Display already labeled namespaces
+      debug:
+        msg: "Namespace {{ item.metadata.name }} already has label backup=true"
+      loop: "{{ filtered_namespaces }}"
+      when: item.metadata.labels.backup == "true"
